@@ -40,6 +40,7 @@ export interface DailyEntry {
   date: string;
   dayType: 'Normal' | 'Special';
   totalPeople: number;
+  presentSoldierIds: string[]; // soldiers who came to mess that day
   menuItems: MenuEntry[];
   perPersonConsumption: Record<string, number>; // itemId -> grams per person
   totalCost: number;
