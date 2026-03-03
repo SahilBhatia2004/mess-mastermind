@@ -102,7 +102,7 @@ export function calculateSoldierDailyCost(
   dailyEntry: DailyEntry,
   rateList: RationItem[]
 ): number {
-  // If presentSoldierIds is populated, only charge soldiers who were present
+  // If presentSoldierIds is populated, only charge soldiers who were present that day
   if (
     dailyEntry.presentSoldierIds &&
     dailyEntry.presentSoldierIds.length > 0 &&
@@ -123,12 +123,18 @@ export function calculateSoldierDailyCost(
     let chargeableGrams: number;
 
     if (soldier.rationMoneyAllowance) {
-      // RMA = YES: full per-person utilisation charged
+      // RMA = YES: full per-person utilisation charged (no deduction)
       chargeableGrams = perPersonGrams;
     } else {
       // RMA = NO: only excess above entitlement is charged
-      const entitlement = soldier.entitlements.find(e => e.itemId === menuItem.itemId);
+      // Match entitlement by itemId first, then fall back to item name match
+      const entitlement =
+        soldier.entitlements.find(e => e.itemId === menuItem.itemId) ??
+        soldier.entitlements.find(
+          e => e.itemName.trim().toLowerCase() === menuItem.itemName.trim().toLowerCase()
+        );
       const entitlementGrams = entitlement?.gramsPerDay ?? 0;
+      // Only charge the excess above daily entitlement
       chargeableGrams = Math.max(0, perPersonGrams - entitlementGrams);
     }
 
@@ -137,6 +143,51 @@ export function calculateSoldierDailyCost(
   }
 
   return totalCost;
+}
+
+// Get a detailed per-item breakdown for a soldier's daily cost (for display purposes)
+export function getSoldierDailyCostBreakdown(
+  soldier: Soldier,
+  dailyEntry: DailyEntry,
+  rateList: RationItem[]
+): Array<{ itemName: string; perPersonGrams: number; entitlementGrams: number; chargeableGrams: number; cost: number }> {
+  if (
+    dailyEntry.presentSoldierIds &&
+    dailyEntry.presentSoldierIds.length > 0 &&
+    !dailyEntry.presentSoldierIds.includes(soldier.id)
+  ) {
+    return [];
+  }
+
+  return dailyEntry.menuItems.map(menuItem => {
+    const perPersonGrams = dailyEntry.perPersonConsumption[menuItem.itemId] ?? 0;
+    const rateItem = rateList.find(r => r.id === menuItem.itemId);
+
+    let entitlementGrams = 0;
+    let chargeableGrams = 0;
+
+    if (perPersonGrams > 0 && rateItem) {
+      if (soldier.rationMoneyAllowance) {
+        chargeableGrams = perPersonGrams;
+      } else {
+        const entitlement =
+          soldier.entitlements.find(e => e.itemId === menuItem.itemId) ??
+          soldier.entitlements.find(
+            e => e.itemName.trim().toLowerCase() === menuItem.itemName.trim().toLowerCase()
+          );
+        entitlementGrams = entitlement?.gramsPerDay ?? 0;
+        chargeableGrams = Math.max(0, perPersonGrams - entitlementGrams);
+      }
+    }
+
+    return {
+      itemName: menuItem.itemName,
+      perPersonGrams,
+      entitlementGrams,
+      chargeableGrams,
+      cost: rateItem ? (chargeableGrams / 1000) * rateItem.ratePerKg : 0,
+    };
+  });
 }
 
 // Calculate mess subs for a soldier for the month
