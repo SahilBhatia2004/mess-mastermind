@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { db, genId } from '@/lib/database';
 import type { DailyEntry, MenuEntry, RationItem } from '@/types/mess';
 import { autoCalculateConsumption } from '@/lib/calculations';
@@ -6,10 +6,11 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
-import { CalendarDays, Zap, Plus, Trash2, Save, CheckCircle2 } from 'lucide-react';
+import { CalendarDays, Zap, Plus, Trash2, Save, CheckCircle2, Users, X } from 'lucide-react';
 
 export default function DailyEntry() {
   const rateList = db.getRateList();
+  const allSoldiers = db.getSoldiers();
   const today = new Date().toISOString().split('T')[0];
 
   const [date, setDate] = useState(today);
@@ -18,9 +19,13 @@ export default function DailyEntry() {
   const [selectedItems, setSelectedItems] = useState<string[]>([]);
   const [menuItems, setMenuItems] = useState<MenuEntry[]>([]);
   const [perPersonConsumption, setPerPersonConsumption] = useState<Record<string, number>>({});
+  const [presentSoldierIds, setPresentSoldierIds] = useState<string[]>([]);
   const [saved, setSaved] = useState(false);
   const [searchItem, setSearchItem] = useState('');
   const [showDropdown, setShowDropdown] = useState(false);
+  const [soldierSearch, setSoldierSearch] = useState('');
+  const [showSoldierDropdown, setShowSoldierDropdown] = useState(false);
+  const soldierSearchRef = useRef<HTMLInputElement>(null);
 
   // Load existing entry for the date
   useEffect(() => {
@@ -31,16 +36,25 @@ export default function DailyEntry() {
       setSelectedItems(existing.menuItems.map(m => m.itemId));
       setMenuItems(existing.menuItems);
       setPerPersonConsumption(existing.perPersonConsumption);
+      setPresentSoldierIds(existing.presentSoldierIds ?? []);
     } else {
       setSelectedItems([]);
       setMenuItems([]);
       setPerPersonConsumption({});
+      setPresentSoldierIds([]);
     }
     setSaved(false);
   }, [date]);
 
   const filteredItems = rateList.filter(
     r => r.name.toLowerCase().includes(searchItem.toLowerCase()) && !selectedItems.includes(r.id)
+  );
+
+  const filteredSoldiers = allSoldiers.filter(
+    s =>
+      (s.name.toLowerCase().includes(soldierSearch.toLowerCase()) ||
+        s.serviceNumber.toLowerCase().includes(soldierSearch.toLowerCase())) &&
+      !presentSoldierIds.includes(s.id)
   );
 
   const addItem = (item: RationItem) => {
@@ -62,16 +76,29 @@ export default function DailyEntry() {
 
   const updateQty = (itemId: string, qty: number) => {
     setMenuItems(prev => prev.map(m => m.itemId === itemId ? { ...m, quantityUsed: qty } : m));
-    if (totalPeople > 0) {
-      setPerPersonConsumption(prev => ({ ...prev, [itemId]: Math.round(qty / totalPeople) }));
+    const headcount = presentSoldierIds.length > 0 ? presentSoldierIds.length : totalPeople;
+    if (headcount > 0) {
+      setPerPersonConsumption(prev => ({ ...prev, [itemId]: Math.round(qty / headcount) }));
     }
   };
 
+  const addSoldier = (soldierId: string) => {
+    setPresentSoldierIds(prev => [...prev, soldierId]);
+    setSoldierSearch('');
+    setShowSoldierDropdown(false);
+  };
+
+  const removeSoldier = (soldierId: string) => {
+    setPresentSoldierIds(prev => prev.filter(id => id !== soldierId));
+  };
+
+  const effectiveHeadcount = presentSoldierIds.length > 0 ? presentSoldierIds.length : totalPeople;
+
   const autoCalculate = () => {
-    if (selectedItems.length === 0 || totalPeople === 0) return;
+    if (selectedItems.length === 0 || effectiveHeadcount === 0) return;
     const result = autoCalculateConsumption({
       menuItems: selectedItems,
-      totalPeople,
+      totalPeople: effectiveHeadcount,
       dayType,
       previousEntries: db.getDailyEntries(),
       rateList,
@@ -92,7 +119,8 @@ export default function DailyEntry() {
       id: existing?.id ?? genId(),
       date,
       dayType,
-      totalPeople,
+      totalPeople: effectiveHeadcount,
+      presentSoldierIds,
       menuItems,
       perPersonConsumption,
       totalCost,
@@ -154,13 +182,21 @@ export default function DailyEntry() {
                 </div>
               </div>
               <div className="space-y-1.5">
-                <Label className="text-xs text-muted-foreground uppercase tracking-wide font-rajdhani">Total People</Label>
-                <Input
-                  type="number"
-                  value={totalPeople}
-                  onChange={e => setTotalPeople(parseInt(e.target.value) || 0)}
-                  className="h-9 bg-input border-border text-sm font-mono"
-                />
+                <Label className="text-xs text-muted-foreground uppercase tracking-wide font-rajdhani">
+                  {presentSoldierIds.length > 0 ? 'Present Soldiers' : 'Total People'}
+                </Label>
+                {presentSoldierIds.length > 0 ? (
+                  <div className="h-9 flex items-center px-3 bg-secondary rounded border border-border font-mono text-sm text-olive font-semibold">
+                    {presentSoldierIds.length} soldiers
+                  </div>
+                ) : (
+                  <Input
+                    type="number"
+                    value={totalPeople}
+                    onChange={e => setTotalPeople(parseInt(e.target.value) || 0)}
+                    className="h-9 bg-input border-border text-sm font-mono"
+                  />
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs text-muted-foreground uppercase tracking-wide font-rajdhani">Est. Total Cost</Label>
@@ -171,13 +207,91 @@ export default function DailyEntry() {
             </div>
           </div>
 
+          {/* Soldier attendance */}
+          <div className="card-military rounded-lg border border-border p-5 space-y-4">
+            <div className="flex items-center gap-2">
+              <Users className="w-4 h-4 text-olive" />
+              <h2 className="font-rajdhani font-semibold tracking-wide text-sm uppercase">Soldiers Present Today</h2>
+              <span className="ml-auto text-xs text-muted-foreground font-rajdhani">
+                {presentSoldierIds.length === 0
+                  ? 'If none selected, bill divides among all soldiers'
+                  : `${presentSoldierIds.length} of ${allSoldiers.length} selected — bill divided among them only`}
+              </span>
+            </div>
+
+            {allSoldiers.length === 0 ? (
+              <p className="text-sm text-muted-foreground">No soldiers in database. Upload soldier data first.</p>
+            ) : (
+              <>
+                {/* Soldier search dropdown */}
+                <div className="relative">
+                  <Input
+                    ref={soldierSearchRef}
+                    value={soldierSearch}
+                    onChange={e => { setSoldierSearch(e.target.value); setShowSoldierDropdown(true); }}
+                    onFocus={() => setShowSoldierDropdown(true)}
+                    placeholder="Search soldier by name or service number..."
+                    className="h-9 bg-input border-border text-sm"
+                  />
+                  {showSoldierDropdown && filteredSoldiers.length > 0 && (
+                    <div className="absolute z-20 top-full mt-1 w-full bg-popover border border-border rounded-lg shadow-card overflow-hidden max-h-48 overflow-y-auto scrollbar-thin">
+                      {filteredSoldiers.map(s => (
+                        <button
+                          key={s.id}
+                          onClick={() => addSoldier(s.id)}
+                          className="w-full flex items-center justify-between px-3 py-2 text-sm hover:bg-secondary transition-colors text-left"
+                        >
+                          <span className="font-medium">{s.name}</span>
+                          <span className="text-xs text-muted-foreground font-mono">{s.rank} · {s.serviceNumber}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {showSoldierDropdown && (
+                    <div className="fixed inset-0 z-10" onClick={() => setShowSoldierDropdown(false)} />
+                  )}
+                </div>
+
+                {/* Selected soldiers chips */}
+                {presentSoldierIds.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {presentSoldierIds.map(id => {
+                      const s = allSoldiers.find(x => x.id === id);
+                      if (!s) return null;
+                      return (
+                        <div
+                          key={id}
+                          className="flex items-center gap-1.5 bg-primary/10 border border-primary/30 text-olive rounded-full px-3 py-1 text-xs font-rajdhani font-semibold"
+                        >
+                          <span>{s.rank} {s.name}</span>
+                          <button
+                            onClick={() => removeSoldier(id)}
+                            className="hover:text-danger transition-colors ml-0.5"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                    <button
+                      onClick={() => setPresentSoldierIds([])}
+                      className="text-xs text-muted-foreground hover:text-danger transition-colors underline underline-offset-2 px-1"
+                    >
+                      Clear all
+                    </button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+
           {/* Menu item selection */}
           <div className="card-military rounded-lg border border-border p-5 space-y-4">
             <div className="flex items-center justify-between">
               <h2 className="font-rajdhani font-semibold tracking-wide text-sm uppercase">Menu Items</h2>
               <Button
                 onClick={autoCalculate}
-                disabled={selectedItems.length === 0 || totalPeople === 0}
+                disabled={selectedItems.length === 0 || effectiveHeadcount === 0}
                 className="btn-amber h-8 text-xs font-rajdhani font-semibold tracking-wide gap-1.5"
               >
                 <Zap className="w-3.5 h-3.5" />
@@ -264,7 +378,7 @@ export default function DailyEntry() {
           </div>
 
           {/* Per person breakdown */}
-          {menuItems.length > 0 && totalPeople > 0 && (
+          {menuItems.length > 0 && effectiveHeadcount > 0 && (
             <div className="card-military rounded-lg border border-border p-5 space-y-3">
               <h2 className="font-rajdhani font-semibold tracking-wide text-sm uppercase">Per Person Utilisation</h2>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2">
