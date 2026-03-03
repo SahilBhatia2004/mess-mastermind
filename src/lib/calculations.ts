@@ -102,6 +102,15 @@ export function calculateSoldierDailyCost(
   dailyEntry: DailyEntry,
   rateList: RationItem[]
 ): number {
+  // If presentSoldierIds is populated, only charge soldiers who were present
+  if (
+    dailyEntry.presentSoldierIds &&
+    dailyEntry.presentSoldierIds.length > 0 &&
+    !dailyEntry.presentSoldierIds.includes(soldier.id)
+  ) {
+    return 0;
+  }
+
   let totalCost = 0;
 
   for (const menuItem of dailyEntry.menuItems) {
