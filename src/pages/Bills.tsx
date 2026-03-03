@@ -1,12 +1,18 @@
 import { useState, useEffect } from 'react';
 import { db } from '@/lib/database';
-import { calculateMonthlyMessSubs } from '@/lib/calculations';
+import { calculateMonthlyMessSubs, getSoldierDailyCostBreakdown } from '@/lib/calculations';
 import { generateBillPDF, generateAllBillsPDF } from '@/lib/billGenerator';
 import type { Soldier, SoldierBill } from '@/types/mess';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { FileText, Download, RefreshCw, Eye, CheckCircle2 } from 'lucide-react';
+import { FileText, Download, RefreshCw, CheckCircle2, Info } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 
 export default function Bills() {
   const [soldiers, setSoldiers] = useState<Soldier[]>([]);
@@ -14,6 +20,7 @@ export default function Bills() {
   const [bills, setBills] = useState<Record<string, SoldierBill>>({});
   const [recalculating, setRecalculating] = useState(false);
   const [config] = useState(db.getConfig());
+  const [breakdownSoldier, setBreakdownSoldier] = useState<Soldier | null>(null);
 
   useEffect(() => {
     setSoldiers(db.getSoldiers());
@@ -67,6 +74,23 @@ export default function Bills() {
   };
 
   const monthSoldiers = soldiers.filter(s => bills[`${s.id}-${month}`]);
+
+  const rateList = db.getRateList();
+  const dailyEntries = db.getDailyEntries();
+
+  // Build per-day breakdown for selected soldier
+  const getBreakdownRows = (soldier: Soldier) => {
+    const monthEntries = dailyEntries.filter(e => e.date.startsWith(month));
+    return monthEntries
+      .filter(entry =>
+        !entry.presentSoldierIds?.length || entry.presentSoldierIds.includes(soldier.id)
+      )
+      .map(entry => ({
+        date: entry.date,
+        items: getSoldierDailyCostBreakdown(soldier, entry, rateList),
+      }))
+      .filter(r => r.items.some(i => i.chargeableGrams > 0));
+  };
 
   return (
     <div className="p-6 space-y-5 animate-fade-in">
@@ -133,7 +157,7 @@ export default function Bills() {
                   <th className="px-4 py-2.5 text-right">Mess Subs</th>
                   <th className="px-4 py-2.5 text-right">Other Charges</th>
                   <th className="px-4 py-2.5 text-right">Total</th>
-                  <th className="px-4 py-2.5 text-center">Bill</th>
+                  <th className="px-4 py-2.5 text-center">Breakdown</th>
                   <th className="px-4 py-2.5 text-center">Download</th>
                 </tr>
               </thead>
@@ -156,7 +180,7 @@ export default function Bills() {
                       <td className="px-4 py-2.5 font-medium text-foreground">{soldier.name}</td>
                       <td className="px-4 py-2.5 text-sm text-muted-foreground">{soldier.rank}</td>
                       <td className="px-4 py-2.5 text-center">
-                        <span className={cn('status-badge px-1.5 py-0.5 rounded border',
+                        <span className={cn('status-badge px-1.5 py-0.5 rounded border text-xs font-rajdhani font-semibold',
                           soldier.rationMoneyAllowance
                             ? 'bg-amber/10 border-amber/30 text-amber'
                             : 'bg-success/10 border-success/30 text-success'
@@ -174,11 +198,16 @@ export default function Bills() {
                         {bill ? `₹${total.toFixed(2)}` : <span className="text-muted-foreground">—</span>}
                       </td>
                       <td className="px-4 py-2.5 text-center">
-                        {bill ? (
-                          <CheckCircle2 className="w-4 h-4 text-success mx-auto" />
-                        ) : (
-                          <span className="text-muted-foreground text-xs">—</span>
-                        )}
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => setBreakdownSoldier(soldier)}
+                          disabled={!bill}
+                          title="View per-day RMA cost breakdown"
+                          className="h-7 text-xs px-2 hover:text-olive disabled:opacity-30"
+                        >
+                          <Info className="w-3.5 h-3.5" />
+                        </Button>
                       </td>
                       <td className="px-4 py-2.5 text-center">
                         <Button
@@ -198,6 +227,63 @@ export default function Bills() {
             </table>
           </div>
         </>
+      )}
+
+      {/* RMA Breakdown Dialog */}
+      {breakdownSoldier && (
+        <Dialog open={!!breakdownSoldier} onOpenChange={() => setBreakdownSoldier(null)}>
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="font-rajdhani text-lg tracking-wide">
+                COST BREAKDOWN — {breakdownSoldier.rank} {breakdownSoldier.name}
+              </DialogTitle>
+              <p className="text-xs text-muted-foreground">
+                RMA: <span className={cn('font-semibold', breakdownSoldier.rationMoneyAllowance ? 'text-amber' : 'text-success')}>
+                  {breakdownSoldier.rationMoneyAllowance ? 'YES (full utilisation charged)' : 'NO (only excess above entitlement charged)'}
+                </span>
+              </p>
+            </DialogHeader>
+            <div className="space-y-4 mt-2">
+              {getBreakdownRows(breakdownSoldier).length === 0 ? (
+                <p className="text-sm text-muted-foreground text-center py-4">No chargeable entries found for this month.</p>
+              ) : (
+                getBreakdownRows(breakdownSoldier).map(row => (
+                  <div key={row.date} className="border border-border rounded-lg overflow-hidden">
+                    <div className="bg-muted/50 px-3 py-1.5 font-rajdhani font-semibold text-xs tracking-wide text-muted-foreground">
+                      {row.date}
+                    </div>
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b border-border">
+                          <th className="px-3 py-1.5 text-left text-muted-foreground">Item</th>
+                          <th className="px-3 py-1.5 text-right text-muted-foreground">Per Person</th>
+                          {!breakdownSoldier.rationMoneyAllowance && (
+                            <th className="px-3 py-1.5 text-right text-muted-foreground">Entitlement</th>
+                          )}
+                          <th className="px-3 py-1.5 text-right text-muted-foreground">Chargeable</th>
+                          <th className="px-3 py-1.5 text-right text-muted-foreground">Cost</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {row.items.map(item => (
+                          <tr key={item.itemName} className="border-t border-border/50">
+                            <td className="px-3 py-1.5 font-medium">{item.itemName}</td>
+                            <td className="px-3 py-1.5 text-right font-mono">{item.perPersonGrams}g</td>
+                            {!breakdownSoldier.rationMoneyAllowance && (
+                              <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">{item.entitlementGrams}g</td>
+                            )}
+                            <td className="px-3 py-1.5 text-right font-mono text-olive">{item.chargeableGrams}g</td>
+                            <td className="px-3 py-1.5 text-right font-mono font-semibold">₹{item.cost.toFixed(2)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ))
+              )}
+            </div>
+          </DialogContent>
+        </Dialog>
       )}
     </div>
   );
