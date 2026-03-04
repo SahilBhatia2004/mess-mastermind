@@ -2,6 +2,26 @@ import * as XLSX from 'xlsx';
 import { db, genId } from './database';
 import type { Soldier, RationItem, SoldierEntitlement } from '../types/mess';
 
+// Normalize column/item names for robust matching
+function normalizeName(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove accents
+    .replace(/[_\s]+/g, ' ')         // normalize whitespace/underscores
+    .trim();
+}
+
+// Multi-tier match: exact → starts-with → contains
+function fuzzyMatchItem(items: RationItem[], key: string): RationItem | undefined {
+  const nKey = normalizeName(key);
+  return (
+    items.find(r => normalizeName(r.name) === nKey) ??
+    items.find(r => normalizeName(r.name).startsWith(nKey) || nKey.startsWith(normalizeName(r.name))) ??
+    items.find(r => normalizeName(r.name).includes(nKey) || nKey.includes(normalizeName(r.name)))
+  );
+}
+
 export interface ExcelParseResult {
   success: boolean;
   message: string;
@@ -29,6 +49,11 @@ export function parseSoldierExcel(file: File): Promise<ExcelParseResult> {
         const rateList = db.getRateList();
         const soldiers: Soldier[] = [];
 
+        const standardCols = new Set([
+          'name', 'service number', 'service_number', 'servicenumber',
+          'rank', 'rma', 'ration money allowance', 'ration_money_allowance',
+        ]);
+
         for (const row of rows) {
           const name = String(row['Name'] || row['name'] || '').trim();
           const serviceNumber = String(row['Service Number'] || row['service_number'] || row['ServiceNumber'] || '').trim();
@@ -38,22 +63,20 @@ export function parseSoldierExcel(file: File): Promise<ExcelParseResult> {
 
           if (!name || !serviceNumber) continue;
 
-          // Parse entitlements directly from ALL non-standard columns in the Excel sheet
-          // Each column after Name/Rank/RMA is treated as an item name with grams entitlement
+          // Parse entitlements from ALL non-standard columns using fuzzy matching
           const entitlements: SoldierEntitlement[] = [];
-          const standardCols = ['Name', 'name', 'Service Number', 'service_number', 'ServiceNumber', 'Rank', 'rank', 'RMA', 'Ration Money Allowance', 'ration_money_allowance'];
 
           for (const key of Object.keys(row)) {
-            if (standardCols.includes(key)) continue;
-            const val = parseFloat(String(row[key])) || 0;
-            // Use the exact column name from Excel as the item name
-            // Try to find a matching rate list item for the itemId, but store the exact name
-            const matchedItem = rateList.find(
-              r => r.name.trim().toLowerCase() === key.trim().toLowerCase()
-            );
+            if (standardCols.has(normalizeName(key))) continue;
+
+            const rawVal = row[key];
+            const val = rawVal !== '' ? (parseFloat(String(rawVal)) || 0) : 0;
+
+            // Use fuzzy match to find rate list item, store exact Excel column name as itemName
+            const matchedItem = fuzzyMatchItem(rateList, key);
             entitlements.push({
               itemId: matchedItem ? matchedItem.id : genId(),
-              itemName: key.trim(), // preserve exact Excel column name
+              itemName: matchedItem ? matchedItem.name : key.trim(), // use canonical name from rate list when matched
               gramsPerDay: val,
             });
           }
