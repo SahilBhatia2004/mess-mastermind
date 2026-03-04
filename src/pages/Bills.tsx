@@ -256,26 +256,29 @@ export default function Bills() {
                       <thead>
                         <tr className="border-b border-border">
                           <th className="px-3 py-1.5 text-left text-muted-foreground">Item</th>
-                          <th className="px-3 py-1.5 text-right text-muted-foreground">Per Person</th>
-                          {!breakdownSoldier.rationMoneyAllowance && (
-                            <th className="px-3 py-1.5 text-right text-muted-foreground">Entitlement</th>
-                          )}
+                           <th className="px-3 py-1.5 text-right text-muted-foreground">Per Person (g)</th>
+                           {!breakdownSoldier.rationMoneyAllowance && (
+                             <th className="px-3 py-1.5 text-right text-muted-foreground">Entitlement (g)</th>
+                           )}
                           <th className="px-3 py-1.5 text-right text-muted-foreground">Chargeable</th>
                           <th className="px-3 py-1.5 text-right text-muted-foreground">Cost</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {row.items.map(item => (
-                          <tr key={item.itemName} className="border-t border-border/50">
-                            <td className="px-3 py-1.5 font-medium">{item.itemName}</td>
-                            <td className="px-3 py-1.5 text-right font-mono">{item.perPersonGrams}g</td>
-                            {!breakdownSoldier.rationMoneyAllowance && (
-                              <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">{item.entitlementGrams}g</td>
-                            )}
-                            <td className="px-3 py-1.5 text-right font-mono text-olive">{item.chargeableGrams}g</td>
-                            <td className="px-3 py-1.5 text-right font-mono font-semibold">₹{item.cost.toFixed(2)}</td>
-                          </tr>
-                        ))}
+                         {row.items.map(item => (
+                           <tr key={item.itemName} className="border-t border-border/50">
+                             <td className="px-3 py-1.5 font-medium capitalize">{item.itemName}</td>
+                             <td className="px-3 py-1.5 text-right font-mono">{item.perPersonGrams}g</td>
+                             {!breakdownSoldier.rationMoneyAllowance && (
+                               <td className="px-3 py-1.5 text-right font-mono text-muted-foreground">
+                                 {item.entitlementGrams}g
+                                 <span className="ml-1 text-muted-foreground/50 text-[10px]">({item.itemName})</span>
+                               </td>
+                             )}
+                             <td className="px-3 py-1.5 text-right font-mono text-olive">{item.chargeableGrams}g</td>
+                             <td className="px-3 py-1.5 text-right font-mono font-semibold">₹{item.cost.toFixed(2)}</td>
+                           </tr>
+                         ))}
                       </tbody>
                     </table>
                   </div>
