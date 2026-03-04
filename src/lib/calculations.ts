@@ -127,12 +127,10 @@ export function calculateSoldierDailyCost(
       chargeableGrams = perPersonGrams;
     } else {
       // RMA = NO: only excess above entitlement is charged
-      // Match entitlement by itemId first, then fall back to item name match
-      const entitlement =
-        soldier.entitlements.find(e => e.itemId === menuItem.itemId) ??
-        soldier.entitlements.find(
-          e => e.itemName.trim().toLowerCase() === menuItem.itemName.trim().toLowerCase()
-        );
+      // Match entitlement by item name only (case-insensitive) — itemId can differ across uploads
+      const entitlement = soldier.entitlements.find(
+        e => e.itemName.trim().toLowerCase() === menuItem.itemName.trim().toLowerCase()
+      );
       const entitlementGrams = entitlement?.gramsPerDay ?? 0;
       // Only charge the excess above daily entitlement
       chargeableGrams = Math.max(0, perPersonGrams - entitlementGrams);
@@ -170,11 +168,10 @@ export function getSoldierDailyCostBreakdown(
       if (soldier.rationMoneyAllowance) {
         chargeableGrams = perPersonGrams;
       } else {
-        const entitlement =
-          soldier.entitlements.find(e => e.itemId === menuItem.itemId) ??
-          soldier.entitlements.find(
-            e => e.itemName.trim().toLowerCase() === menuItem.itemName.trim().toLowerCase()
-          );
+        // Match by item name only (case-insensitive) — itemId can differ across uploads
+        const entitlement = soldier.entitlements.find(
+          e => e.itemName.trim().toLowerCase() === menuItem.itemName.trim().toLowerCase()
+        );
         entitlementGrams = entitlement?.gramsPerDay ?? 0;
         chargeableGrams = Math.max(0, perPersonGrams - entitlementGrams);
       }
