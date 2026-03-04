@@ -38,45 +38,24 @@ export function parseSoldierExcel(file: File): Promise<ExcelParseResult> {
 
           if (!name || !serviceNumber) continue;
 
-          // Parse entitlements from remaining columns
+          // Parse entitlements directly from ALL non-standard columns in the Excel sheet
+          // Each column after Name/Rank/RMA is treated as an item name with grams entitlement
           const entitlements: SoldierEntitlement[] = [];
-          for (const item of rateList) {
-            // Try various column name patterns
-            const possibleKeys = [
-              item.name,
-              item.name.toLowerCase(),
-              item.name.toUpperCase(),
-              `${item.name}_g`,
-              `${item.name} (g)`,
-            ];
-            let value = 0;
-            for (const key of possibleKeys) {
-              if (row[key] !== undefined && row[key] !== '') {
-                value = parseFloat(String(row[key])) || 0;
-                break;
-              }
-            }
-            entitlements.push({ itemId: item.id, itemName: item.name, gramsPerDay: value });
-          }
-
-          // Also parse any extra columns not in rate list
           const standardCols = ['Name', 'name', 'Service Number', 'service_number', 'ServiceNumber', 'Rank', 'rank', 'RMA', 'Ration Money Allowance', 'ration_money_allowance'];
+
           for (const key of Object.keys(row)) {
             if (standardCols.includes(key)) continue;
-            const alreadyAdded = entitlements.some(e => e.itemName.toLowerCase() === key.toLowerCase());
-            if (!alreadyAdded) {
-              const val = parseFloat(String(row[key])) || 0;
-              if (val > 0) {
-                // Check if this item exists in rate list
-                const matchedItem = rateList.find(r => r.name.toLowerCase() === key.toLowerCase());
-                if (matchedItem) {
-                  const idx = entitlements.findIndex(e => e.itemId === matchedItem.id);
-                  if (idx >= 0) entitlements[idx].gramsPerDay = val;
-                } else {
-                  entitlements.push({ itemId: genId(), itemName: key, gramsPerDay: val });
-                }
-              }
-            }
+            const val = parseFloat(String(row[key])) || 0;
+            // Use the exact column name from Excel as the item name
+            // Try to find a matching rate list item for the itemId, but store the exact name
+            const matchedItem = rateList.find(
+              r => r.name.trim().toLowerCase() === key.trim().toLowerCase()
+            );
+            entitlements.push({
+              itemId: matchedItem ? matchedItem.id : genId(),
+              itemName: key.trim(), // preserve exact Excel column name
+              gramsPerDay: val,
+            });
           }
 
           soldiers.push({
